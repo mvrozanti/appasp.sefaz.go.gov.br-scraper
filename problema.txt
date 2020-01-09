@@ -1,0 +1,44 @@
+
+
+DESAFIO SCRAPER JIVE 2020:
+
+ 
+
+Usando Python, Selenium e Beautiful Soup crie um script que:
+
+1. Carregue a lista de cnpjs do arquivo cnpjs.csv
+
+2. Para cada cnpj:
+
+                2.1. Acesse:
+
+                http://appasp.sefaz.go.gov.br/Sintegra/Consulta/default.asp?
+
+                2.2. Selecione opção CNPJ
+
+                2.3. Preencha CNPJ no campo
+
+                2.4. Clique em Consultar
+
+                2.4.1. Se localizado, extraia campos: CNPJ, Inscrição Estadual - CCE, Nome empresarial, Contribuinte?, Atividade principal, Situação Cadastral Vigente, Data desta situação cadastral (formato YYYY-MM-DD), Data de cadastramento (formato YYYY-MM-DD)
+
+                2.4.2. Se não localizado adicione apenas CNPJ e valores NULL nos demais campos
+
+                2.5. Adicione valores numa linha do arquivo sefaz_go.csv
+
+ 
+
+Entregar código python e arquivo de saída sefaz_go.csv
+
+PRAZO: 13/01/2020 23:59
+
+ 
+
+O código deve estar bem organizado e com comentários relevantes.
+
+Código idiomático (pythônico) e prever alguns casos de falha são um plus.
+
+ 
+
+Qualquer dúvida podem falar comigo. Podem mandar mesmo que não esteja perfeito ou completo.
+“Esta mensagem e seus anexos podem conter informações confidenciais ou privilegiadas, protegidas por sigilo profissional ou cuja divulgação seja proibida por lei. Se você não é o destinatário dos mesmos você não está autorizado a utilizar o material para qualquer fim. Solicitamos que você apague a mensagem e avise imediatamente ao remetente. O uso não autorizado de tais informações é proibido e está sujeito às penalidades cabíveis. O conteúdo desta mensagem e seus anexos não representam necessariamente a opinião e a intenção da empresa e não constituem recomendação de investimento, não implicando qualquer obrigação ou responsabilidade por parte da mesma.” “This message and its attachments may contain confidential or privileged information that may be protected by professional secrecy or have its distribution legally prohibited. If you are not the intended recipient of this message, you are not authorized to divulge or use this message in any way. We ask that you delete this message and immediately inform the sender. The unauthorized use of the contents of this message is prohibited and subject to penalties. The content of this message and its annexes do not necessarily represent the opinion and intentions of this firm, do not constitute investment advice, and are not intended to create any obligation or liability to the firm.” 
