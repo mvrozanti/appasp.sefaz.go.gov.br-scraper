@@ -55,55 +55,45 @@ class CNPJScraper:
         cnpj_field.send_keys(cnpj_alvo)
         cnpj_field.send_keys(Keys.RETURN)
         d.switch_to.window(d.window_handles[1])
-
-        # WebDriverWait(d, 10).until(
-        #         lambda d:
-        #         EC.text_to_be_present_in_element((By.TAG_NAME, 'tbody'), 'CADASTRO ATUALIZADO EM')
-        #         or
-        #         EC.text_to_be_present_in_element((By.TAG_NAME, 'body'), 'Não foi encontrado')
-        #         )
-
         try:
-            WebDriverWait(d, 1).until(EC.text_to_be_present_in_element((By.TAG_NAME, 'tbody'), 'CADASTRO ATUALIZADO EM'))
-        except Exception as e: 
-                d.close()
-                return ['NULL']*8
-        regex = re.compile(r'CNPJ:\n(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}).*INSCRIÇÃO ESTADUAL - CCE :\n(.*)\n.*NOME EMPRESARIAL:\n(.*)\n.*CONTRIBUINTE\?\n*(.*)\n(?:\n|.)*\n(?:\n|.)+ATIVIDADE PRINCIPAL\n(.*)(?:\n|.)+SITUAÇÃO CADASTRAL VIGENTE:\n(.*)\n.*DATA DESTA SITUAÇÃO CADASTRAL:\n([^\s]+).*DATA DE CADASTRAMENTO:\n(.*)', re.MULTILINE)
-        try:
-            body_element = d.find_element_by_tag_name('body')
-            m = next(filter(lambda match: match, regex.finditer(body_element.text)))
-            return m.groups()
+            WebDriverWait(d, 5).until(EC.presence_of_element_located((By.TAG_NAME, 'tbody')))
         except Exception as e: 
             print(e)
+            print('nao achou tbody')
             code.interact(local=globals().update(locals()) or globals())
-        # relevant_elements = d.find_elements_by_class_name('label_text')
-        # cnpj_extraido = relevant_elements[0].text
-        # inscricao_estadual_cce = relevant_elements[1].text
-        # nome_empresarial = relevant_elements[2].text
-        # indicador_contribuinte = relevant_elements[3].text
-        # atividade_principal = relevant_elements[15].text
-        # situacao_cadastral_vigente = relevant_elements[19].text
-        # normalize_date = lambda date_str: datetime.strptime(date_str, '%d/%m/%Y').strftime('%Y-%m-%d')
-        # try:
-        #     data_desta_situacao_cadastral = normalize_date(relevant_elements[20].text)
-        #     data_de_cadastramento = normalize_date(relevant_elements[21].text)
-        # except Exception as e: 
-        #     print(e)
-        #     code.interact(local=globals().update(locals()) or globals())
-        # if cnpj_alvo != re.sub(r'[^\d+]', '', cnpj_extraido):
-        #     print('Formato do site foi alterado. Favor reportar este incidente.')
-        #     sys.exit(1)
-        # d.close()
-        # return [
-        #         cnpj_extraido, 
-        #         inscricao_estadual_cce, 
-        #         nome_empresarial, 
-        #         indicador_contribuinte, 
-        #         atividade_principal, 
-        #         situacao_cadastral_vigente, 
-        #         data_desta_situacao_cadastral, 
-        #         data_de_cadastramento
-        #         ]
+        tbody_element = d.find_element_by_tag_name('tbody')
+        WebDriverWait(d, 5).until(lambda d: 
+                EC.text_to_be_present_in_element((By.TAG_NAME, 'tbody'), 'CADASTRO ATUALIZADO EM')
+                or
+                EC.text_to_be_present_in_element((By.TAG_NAME, 'tbody'), 'foi encontrado nenhum')
+                )
+        if 'foi encontrado nenhum' in d.find_element_by_tag_name('tbody').text:
+            d.close()
+            return ['NULL']*8
+        regex_fluxo_principal = re.compile(r'CNPJ:\n(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}).*INSCRIÇÃO ESTADUAL - CCE :\n(.*)\n.*NOME EMPRESARIAL:\n(.*)\n.*CONTRIBUINTE\?\n*(.*)\n(?:\n|.)*\n(?:\n|.)+ATIVIDADE PRINCIPAL\n(.*)(?:\n|.)+SITUAÇÃO CADASTRAL VIGENTE:\n(.*)\n.*DATA DESTA SITUAÇÃO CADASTRAL:\n([^\s]+).*DATA DE CADASTRAMENTO:\n(.*)', re.MULTILINE)
+        try:
+            body_element = d.find_element_by_tag_name('body')
+            m = next(filter(lambda match: match, regex_fluxo_principal.finditer(body_element.text)))
+            normalize_date = lambda date_str: datetime.strptime(date_str, '%d/%m/%Y').strftime('%Y-%m-%d')
+            info = [i.strip() for i in m.groups()]
+            info[-1] = normalize_date(info[-1])
+            info[-2] = normalize_date(info[-2])
+            if cnpj_alvo != re.sub(r'[^\d+]', '', info[0]):
+                print('Formato do site foi alterado. Favor reportar este incidente.')
+                sys.exit(1)
+            d.close()
+            return info
+        except Exception as e: 
+            if 'existe mais de uma Inscrição Estadual para o par' in body_element.text:
+                regex_fluxo_multiplas_inscricoes_estaduais = re.compile(r'abaixo relacionadas\.\n\n((?:\d+\n)+)')
+                m = next(regex_fluxo_multiplas_inscricoes_estaduais.finditer(body_element.text))
+                cnpjs_raiz_alvo = [cnpj for cnpj in m.group(1).split('\n') if cnpj]
+                code.interact(local=globals().update(locals()) or globals())
+                return [self.get_single(cra + cnpj_alvo[-5:], timeout) for cra in cnpjs_raiz_alvo]
+            else:
+                print(e)
+                code.interact(local=globals().update(locals()) or globals())
+            return ['NULL']*8
 
 def main(args):
     if op.exists(args.output) and not args.force:
@@ -114,13 +104,19 @@ def main(args):
         print(f'Arquivo de input "{args.input}" não existe.', file=sys.stderr)
         sys.exit(3)
     cnpjs_alvo = [ca.rstrip() for ca in open(args.input).readlines()]
-    with open(args.output, 'a') as of:
+    with open(args.output, 'w') as of:
+        output_writer = csv.writer(of, delimiter=',', dialect='excel', quoting=csv.QUOTE_MINIMAL)
         for cnpj_alvo in cnpjs_alvo:
-            print(f'Tentando {cnpj_alvo}')
-            single_cnpj_info = scraper.get_single(cnpj_alvo, args.timeout)
-            code.interact(local=globals().update(locals()) or globals())
-            if single_cnpj_info:
-                of.write(','.join(single_cnpj_info)+'\n')
+            if args.verbose:
+                print(f'Tentando {cnpj_alvo}:')
+            cnpj_info = scraper.get_single(cnpj_alvo, args.timeout)
+            if args.verbose:
+                print(cnpj_info)
+            if cnpj_info:
+                if type(cnpj_info[0]) == list:
+                    output_writer.writerows(cnpj_info)
+                else:
+                    output_writer.writerow(cnpj_info)
                 of.flush()
 
 if __name__ == '__main__':
@@ -138,4 +134,6 @@ if __name__ == '__main__':
             help='Sobrescrever um arquivo de output pré-existente')
     parser.add_argument('-t', '--timeout', metavar='TIMEOUT', type=int,
             help='Especifica o timeout do bot em milissegundos')
+    parser.add_argument('-v', '--verbose', action='store_true', 
+            help='Mostrar mensagens de debug')
     main(parser.parse_args())
