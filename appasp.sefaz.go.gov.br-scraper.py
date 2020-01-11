@@ -161,7 +161,7 @@ if __name__ == '__main__':
             help='Especifica o caminho do arquivo csv de output')
     parser.add_argument('-f', '--force', action='store_true', default=False, 
             help='Sobrescrever um arquivo de output pré-existente')
-    parser.add_argument('-t', '--timeout', metavar='TIMEOUT', type=int,
+    parser.add_argument('-t', '--timeout', metavar='TIMEOUT', type=int, default=5,
             help='Especifica o timeout do bot em segundos')
     parser.add_argument('-v', '--verbose', action='store_true', 
             help='Mostrar mensagens de debug')
