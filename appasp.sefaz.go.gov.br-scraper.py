@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-from bs4 import BeautifulSoup
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
@@ -7,16 +7,14 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-from datetime import datetime
 import argparse
 import atexit
 import code
 import csv
-import psutil
+import os.path as op
 import re
 import signal
 import sys
-import os.path as op
 
 BASE_URL = 'http://appasp.sefaz.go.gov.br/'
 DEFAULT_RELATIVE_URL = 'Sintegra/Consulta/default.asp?'
@@ -44,7 +42,7 @@ class CNPJScraper:
         d.switch_to.window(d.window_handles[0])
         d.get(self.url)
         for wh in d.window_handles[1:]:
-            d.switch_to.window(wh);
+            d.switch_to.window(wh)
             d.close()
         d.switch_to.window(d.window_handles[0])
 
@@ -63,20 +61,27 @@ class CNPJScraper:
             cnpj_field.send_keys(Keys.RETURN)
         d.switch_to.window(d.window_handles[-1])
         try:
-            WebDriverWait(d, 5).until(EC.presence_of_element_located((By.TAG_NAME, 'tbody')))
+            WebDriverWait(d, timeout).until(EC.presence_of_element_located((By.TAG_NAME, 'tbody')))
         except Exception as e: 
             print(e)
             print('nao achou tbody')
             code.interact(local=globals().update(locals()) or globals())
         tbody_element = d.find_element_by_tag_name('tbody')
-        WebDriverWait(d, 5).until(lambda d: 
+        WebDriverWait(d, timeout).until(lambda d: 
                 EC.text_to_be_present_in_element(tbody_element, 'CADASTRO ATUALIZADO EM')
                 or
                 EC.text_to_be_present_in_element(tbody_element, 'foi encontrado nenhum')
                 )
         if 'foi encontrado nenhum' in tbody_element.text:
             return [formata_cnpj(cnpj_alvo)]+['NULL']*7
-        regex_fluxo_principal = re.compile(r'CNPJ:\n(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}).*INSCRIÇÃO ESTADUAL - CCE :\n(.*)\n.*NOME EMPRESARIAL:\n(.*)\n.*CONTRIBUINTE\?\n*(.*)\n(?:\n|.)*\n(?:\n|.)+ATIVIDADE PRINCIPAL\n(.*)(?:\n|.)+SITUAÇÃO CADASTRAL VIGENTE:\n(.*)\n.*DATA DESTA SITUAÇÃO CADASTRAL:\n([^\s]+).*DATA DE CADASTRAMENTO:\n(.*)', re.MULTILINE)
+        regex_fluxo_principal = re.compile(r'CNPJ:\n(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}).*' +
+                r'INSCRIÇÃO ESTADUAL - CCE :\n(.*)\n.*' +
+                r'NOME EMPRESARIAL:\n(.*)\n.*' +
+                r'CONTRIBUINTE\?\n*(.*)\n(?:\n|.)*\n(?:\n|.)+' +
+                r'ATIVIDADE PRINCIPAL\n(.*)(?:\n|.)+' +
+                r'SITUAÇÃO CADASTRAL VIGENTE:\n(.*)\n.*' +
+                r'DATA DESTA SITUAÇÃO CADASTRAL:\n([^\s]+).*' +
+                r'DATA DE CADASTRAMENTO:\n(.*)', re.MULTILINE)
         try:
             body_element = d.find_element_by_tag_name('body')
             m = next(filter(lambda match: match, regex_fluxo_principal.finditer(body_element.text)))
@@ -150,7 +155,7 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--force', action='store_true', default=False, 
             help='Sobrescrever um arquivo de output pré-existente')
     parser.add_argument('-t', '--timeout', metavar='TIMEOUT', type=int,
-            help='Especifica o timeout do bot em milissegundos')
+            help='Especifica o timeout do bot em segundos')
     parser.add_argument('-v', '--verbose', action='store_true', 
             help='Mostrar mensagens de debug')
     main(parser.parse_args())
