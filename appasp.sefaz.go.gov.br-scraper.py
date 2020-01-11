@@ -19,15 +19,14 @@ import sys
 import os.path as op
 
 BASE_URL = 'http://appasp.sefaz.go.gov.br/'
+DEFAULT_RELATIVE_URL = 'Sintegra/Consulta/default.asp?'
 
-def exit_gracefully(driver):
-    # DB.close()
-    driver.close()
-    try: 
-        for proc in psutil.process_iter():
-            if proc.name() == 'firefox': proc.kill()
-    except Exception as e: print(e)
-    finally: sys.exit(0)
+def erro_formato_site():
+    print('Formato do site foi alterado. Favor reportar este incidente.')
+    sys.exit(1)
+
+def formata_cnpj(cnpj):
+    return f'{cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:]}'
 
 class CNPJScraper:
 
@@ -36,25 +35,33 @@ class CNPJScraper:
         opts.headless = not headful
         self.driver = webdriver.Firefox(options=opts)
         self.url = BASE_URL + relative_url
-        # atexit.register(exit_gracefully, driver)
-        # signal.signal(signal.SIGINT, lambda x,y: exit_gracefully(driver))
-        # self.driver.set_window_size(1024, 768)
 
-    def get_single(self, cnpj_alvo, timeout):
-        if not re.match(r'\d{14}', cnpj_alvo):
-            print(f'CNPJ "{cnpj_alvo}" é inválido.', file=sys.stderr)
-            sys.exit(1)
+    def reset(self):
+        """
+        volta à página de pesquisa e fecha todas as outras abas
+        """
         d = self.driver
         d.switch_to.window(d.window_handles[0])
         d.get(self.url)
+        for wh in d.window_handles[1:]:
+            d.switch_to.window(wh);
+            d.close()
+        d.switch_to.window(d.window_handles[0])
 
-        d.find_element_by_xpath('/html/body/form/div/div[2]/input[2]').click()
-        d.find_element_by_id('rTipoDocCNPJ').click()
-        cnpj_field = d.find_element_by_id('tCNPJ')
-        cnpj_field.clear()
-        cnpj_field.send_keys(cnpj_alvo)
-        cnpj_field.send_keys(Keys.RETURN)
-        d.switch_to.window(d.window_handles[1])
+    def get_single(self, cnpj_alvo, timeout):
+        d = self.driver
+        normalize_cnpj = lambda cnpj: re.sub(r'[^\d+]', '', cnpj)
+        if cnpj_alvo:
+            if not re.match(r'\d{14}', cnpj_alvo):
+                print(f'CNPJ "{cnpj_alvo}" é inválido.', file=sys.stderr)
+                sys.exit(1)
+            d.find_element_by_xpath('/html/body/form/div/div[2]/input[2]').click()
+            d.find_element_by_id('rTipoDocCNPJ').click()
+            cnpj_field = d.find_element_by_id('tCNPJ')
+            cnpj_field.clear()
+            cnpj_field.send_keys(cnpj_alvo)
+            cnpj_field.send_keys(Keys.RETURN)
+        d.switch_to.window(d.window_handles[-1])
         try:
             WebDriverWait(d, 5).until(EC.presence_of_element_located((By.TAG_NAME, 'tbody')))
         except Exception as e: 
@@ -63,13 +70,12 @@ class CNPJScraper:
             code.interact(local=globals().update(locals()) or globals())
         tbody_element = d.find_element_by_tag_name('tbody')
         WebDriverWait(d, 5).until(lambda d: 
-                EC.text_to_be_present_in_element((By.TAG_NAME, 'tbody'), 'CADASTRO ATUALIZADO EM')
+                EC.text_to_be_present_in_element(tbody_element, 'CADASTRO ATUALIZADO EM')
                 or
-                EC.text_to_be_present_in_element((By.TAG_NAME, 'tbody'), 'foi encontrado nenhum')
+                EC.text_to_be_present_in_element(tbody_element, 'foi encontrado nenhum')
                 )
-        if 'foi encontrado nenhum' in d.find_element_by_tag_name('tbody').text:
-            d.close()
-            return ['NULL']*8
+        if 'foi encontrado nenhum' in tbody_element.text:
+            return [formata_cnpj(cnpj_alvo)]+['NULL']*7
         regex_fluxo_principal = re.compile(r'CNPJ:\n(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}).*INSCRIÇÃO ESTADUAL - CCE :\n(.*)\n.*NOME EMPRESARIAL:\n(.*)\n.*CONTRIBUINTE\?\n*(.*)\n(?:\n|.)*\n(?:\n|.)+ATIVIDADE PRINCIPAL\n(.*)(?:\n|.)+SITUAÇÃO CADASTRAL VIGENTE:\n(.*)\n.*DATA DESTA SITUAÇÃO CADASTRAL:\n([^\s]+).*DATA DE CADASTRAMENTO:\n(.*)', re.MULTILINE)
         try:
             body_element = d.find_element_by_tag_name('body')
@@ -78,22 +84,32 @@ class CNPJScraper:
             info = [i.strip() for i in m.groups()]
             info[-1] = normalize_date(info[-1])
             info[-2] = normalize_date(info[-2])
-            if cnpj_alvo != re.sub(r'[^\d+]', '', info[0]):
-                print('Formato do site foi alterado. Favor reportar este incidente.')
-                sys.exit(1)
-            d.close()
+            if not cnpj_alvo:
+                d.close()
+            elif cnpj_alvo != normalize_cnpj(info[0]):
+                erro_formato_site()
             return info
-        except Exception as e: 
+        except StopIteration as e: 
             if 'existe mais de uma Inscrição Estadual para o par' in body_element.text:
                 regex_fluxo_multiplas_inscricoes_estaduais = re.compile(r'abaixo relacionadas\.\n\n((?:\d+\n)+)')
                 m = next(regex_fluxo_multiplas_inscricoes_estaduais.finditer(body_element.text))
                 cnpjs_raiz_alvo = [cnpj for cnpj in m.group(1).split('\n') if cnpj]
-                code.interact(local=globals().update(locals()) or globals())
-                return [self.get_single(cra + cnpj_alvo[-5:], timeout) for cra in cnpjs_raiz_alvo]
+                if not cnpj_alvo:
+                    print('not cnpj_alvo')  
+                    code.interact(local=globals().update(locals()) or globals())
+                print('cnpjs_raiz_alvo')
+                mult = []
+                wh = self.driver.current_window_handle
+                for cnpj_raiz_alvo in cnpjs_raiz_alvo:
+                    d.switch_to.window(wh)
+                    d.execute_script(f"fSend('{cnpj_raiz_alvo}')")
+                    mult += [self.get_single(None, timeout)]
+                # d.close()
+                return mult
             else:
                 print(e)
                 code.interact(local=globals().update(locals()) or globals())
-            return ['NULL']*8
+            return [formata_cnpj(cnpj_alvo)]+['NULL']*7
 
 def main(args):
     if op.exists(args.output) and not args.force:
@@ -107,13 +123,14 @@ def main(args):
     with open(args.output, 'w') as of:
         output_writer = csv.writer(of, delimiter=',', dialect='excel', quoting=csv.QUOTE_MINIMAL)
         for cnpj_alvo in cnpjs_alvo:
+            scraper.reset()
             if args.verbose:
                 print(f'Tentando {cnpj_alvo}:')
             cnpj_info = scraper.get_single(cnpj_alvo, args.timeout)
             if args.verbose:
                 print(cnpj_info)
             if cnpj_info:
-                if type(cnpj_info[0]) == list:
+                if type(cnpj_info[0]) == list: # caso das múltiplas inscrições
                     output_writer.writerows(cnpj_info)
                 else:
                     output_writer.writerow(cnpj_info)
@@ -123,9 +140,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='scraper de informações de CNPJ via appasp.sefaz.go.gov.br')
     parser.add_argument('-H', '--headful', action='store_true', default=False, 
             help='Torna o browser visível (desligado por default)')
-    parser.add_argument('-U', '--url', default='Sintegra/Consulta/default.asp?', 
+    parser.add_argument('-U', '--url', default=DEFAULT_RELATIVE_URL, 
             help='Especifica a URL relativa para a consulta do site.\n' +
-            'Caso não seja especificada, será "Sintegra/Consulta/default.asp?"') # caso o site atualize e seja necessário alterá-la "por fora" do script
+            f'Caso não seja especificada, será "{DEFAULT_RELATIVE_URL}"') # caso o site atualize e seja necessário alterá-la "por fora" do script
     parser.add_argument('-i', '--input', default='cnpj.csv', 
             help='Especifica o caminho do arquivo que contém os CNPJs (1 por linha, apenas dígitos) a serem consultados')
     parser.add_argument('-o', '--output', default='sefaz_go.csv', 
