@@ -19,8 +19,8 @@ import sys
 BASE_URL = 'http://appasp.sefaz.go.gov.br/'
 DEFAULT_RELATIVE_URL = 'Sintegra/Consulta/default.asp?'
 
-def erro_formato_site():
-    print('Formato do site foi alterado. Favor reportar este incidente.')
+def site_format_error(reason):
+    print(f'Formato do site foi alterado, em função do campo "{reason}". Favor reportar este incidente.')
     sys.exit(1)
 
 def formata_cnpj(cnpj):
@@ -47,8 +47,16 @@ class CNPJScraper:
         d.switch_to.window(d.window_handles[0])
 
     def get_single(self, cnpj_alvo, timeout):
+        """
+        Extrai o cnpj_alvo da página aberta após consultá-lo, caso seja especificado.
+        Caso não seja especificado, procura inscrições-raiz na página atual e as extrai coletivamente.
+        """
+
+        # inicializar variáveis de auxílio
         d = self.driver
         normalize_cnpj = lambda cnpj: re.sub(r'[^\d+]', '', cnpj)
+        normalize_date = lambda date_str: datetime.strptime(date_str, '%d/%m/%Y').strftime('%Y-%m-%d')
+
         if cnpj_alvo:
             if not re.match(r'\d{14}', cnpj_alvo):
                 print(f'CNPJ "{cnpj_alvo}" é inválido.', file=sys.stderr)
@@ -64,8 +72,7 @@ class CNPJScraper:
             WebDriverWait(d, timeout).until(EC.presence_of_element_located((By.TAG_NAME, 'tbody')))
         except Exception as e: 
             print(e)
-            print('nao achou tbody')
-            code.interact(local=globals().update(locals()) or globals())
+            site_format_error('tbody não ter sido encontrado')
         tbody_element = d.find_element_by_tag_name('tbody')
         WebDriverWait(d, timeout).until(lambda d: 
                 EC.text_to_be_present_in_element(tbody_element, 'CADASTRO ATUALIZADO EM')
@@ -85,35 +92,35 @@ class CNPJScraper:
         try:
             body_element = d.find_element_by_tag_name('body')
             m = next(filter(lambda match: match, regex_fluxo_principal.finditer(body_element.text)))
-            normalize_date = lambda date_str: datetime.strptime(date_str, '%d/%m/%Y').strftime('%Y-%m-%d')
             info = [i.strip() for i in m.groups()]
-            info[-1] = normalize_date(info[-1])
-            info[-2] = normalize_date(info[-2])
+            try:
+                info[-1] = normalize_date(info[-1])
+            except Exception as e: 
+                site_format_error(f'DATA DESTA SITUAÇÃO CADASTRAL para o cnpj={cnpj_alvo}')
+            try:
+                info[-2] = normalize_date(info[-2])
+            except Exception as e: 
+                site_format_error(f'DATA DE CADASTRAMENTO para o cnpj={cnpj_alvo}')
             if not cnpj_alvo:
                 d.close()
             elif cnpj_alvo != normalize_cnpj(info[0]):
-                erro_formato_site()
+                site_format_error(f'CNPJ para o cnpj={cnpj_alvo}')
             return info
         except StopIteration as e: 
             if 'existe mais de uma Inscrição Estadual para o par' in body_element.text:
                 regex_fluxo_multiplas_inscricoes_estaduais = re.compile(r'abaixo relacionadas\.\n\n((?:\d+\n)+)')
                 m = next(regex_fluxo_multiplas_inscricoes_estaduais.finditer(body_element.text))
                 cnpjs_raiz_alvo = [cnpj for cnpj in m.group(1).split('\n') if cnpj]
-                if not cnpj_alvo:
-                    print('not cnpj_alvo')  
-                    code.interact(local=globals().update(locals()) or globals())
-                print('cnpjs_raiz_alvo')
                 mult = []
                 wh = self.driver.current_window_handle
                 for cnpj_raiz_alvo in cnpjs_raiz_alvo:
                     d.switch_to.window(wh)
                     d.execute_script(f"fSend('{cnpj_raiz_alvo}')")
                     mult += [self.get_single(None, timeout)]
-                # d.close()
                 return mult
             else:
                 print(e)
-                code.interact(local=globals().update(locals()) or globals())
+                site_format_error('regex errado')
             return [formata_cnpj(cnpj_alvo)]+['NULL']*7
 
 def main(args):
