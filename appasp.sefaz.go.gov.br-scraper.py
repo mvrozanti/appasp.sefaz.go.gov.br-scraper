@@ -53,13 +53,14 @@ class CNPJScraper:
         normalize_cnpj = lambda cnpj: re.sub(r'[^\d+]', '', cnpj)
         normalize_date = lambda date_str: datetime.strptime(date_str, '%d/%m/%Y').strftime('%Y-%m-%d')
 
+        # fluxo principal
         if cnpj_alvo:
             if not re.match(r'\d{14}', cnpj_alvo):
                 print(f'CNPJ "{cnpj_alvo}" é inválido.', file=sys.stderr)
                 sys.exit(1)
-            d.find_element_by_xpath('/html/body/form/div/div[2]/input[2]').click()
-            d.find_element_by_id('rTipoDocCNPJ').click()
-            cnpj_field = d.find_element_by_id('tCNPJ')
+            d.find_element_by_xpath('/html/body/form/div/div[2]/input[2]').click() # clica botão "Limpar"
+            d.find_element_by_id('rTipoDocCNPJ').click() # seleciona checkbox de CNPJ 
+            cnpj_field = d.find_element_by_id('tCNPJ') # encontra campo para escrever CNPJ
             cnpj_field.clear()
             cnpj_field.send_keys(cnpj_alvo)
             cnpj_field.send_keys(Keys.RETURN)
@@ -77,13 +78,13 @@ class CNPJScraper:
                 )
         if 'foi encontrado nenhum' in tbody_element.text:
             return [format_cnpj(cnpj_alvo)]+['NULL']*7
-        regex_fluxo_principal = re.compile(r'CNPJ:\n(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}).*' +
-                r'INSCRIÇÃO ESTADUAL - CCE :\n(.*)\n.*' +
-                r'NOME EMPRESARIAL:\n(.*)\n.*' +
-                r'CONTRIBUINTE\?\n*(.*)\n(?:\n|.)*\n(?:\n|.)+' +
-                r'ATIVIDADE PRINCIPAL\n(.*)(?:\n|.)+' +
-                r'SITUAÇÃO CADASTRAL VIGENTE:\n(.*)\n.*' +
-                r'DATA DESTA SITUAÇÃO CADASTRAL:\n([^\s]+).*' +
+        regex_fluxo_principal = re.compile(r'CNPJ:\n(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}).*'  +
+                r'INSCRIÇÃO ESTADUAL - CCE :\n(.*)\n.*'                                    +
+                r'NOME EMPRESARIAL:\n(.*)\n.*'                                             +
+                r'CONTRIBUINTE\?\n*(.*)\n(?:\n|.)*\n(?:\n|.)+'                             +
+                r'ATIVIDADE PRINCIPAL\n(.*)(?:\n|.)+'                                      +
+                r'SITUAÇÃO CADASTRAL VIGENTE:\n(.*)\n.*'                                   +
+                r'DATA DESTA SITUAÇÃO CADASTRAL:\n([^\s]+).*'                              +
                 r'DATA DE CADASTRAMENTO:\n(.*)', re.MULTILINE)
         try:
             body_element = d.find_element_by_tag_name('body')
@@ -102,8 +103,8 @@ class CNPJScraper:
             elif cnpj_alvo != normalize_cnpj(info[0]):
                 site_format_error(f'CNPJ para o cnpj={cnpj_alvo}')
             return info
-        except StopIteration as e: 
-            if 'existe mais de uma Inscrição Estadual para o par' in body_element.text:
+        except StopIteration as e: # fluxo alternativo, em que várias Inscrições Estaduais estão relacionadas a este CNPJ
+            if 'existe mais de uma Inscrição Estadual para o par' in body_element.text: 
                 regex_fluxo_multiplas_inscricoes_estaduais = re.compile(r'abaixo relacionadas\.\n\n((?:\d+\n)+)')
                 m = next(regex_fluxo_multiplas_inscricoes_estaduais.finditer(body_element.text))
                 cnpjs_raiz_alvo = [cnpj for cnpj in m.group(1).split('\n') if cnpj]
@@ -162,4 +163,3 @@ if __name__ == '__main__':
     parser.add_argument('-v', '--verbose', action='store_true', 
             help='Mostrar mensagens de debug')
     main(parser.parse_args())
-#

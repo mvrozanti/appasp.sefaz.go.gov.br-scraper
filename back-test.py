@@ -10,11 +10,10 @@ import argparse
 import atexit
 
 def main(args):
-    record_file = 'record.txt'
     try:
-        record = float(open(record_file).read()) if op.exists(record_file) else -1
+        record = float(open(args.record_file).read()) if op.exists(args.record_file) else -1
     except ValueError as e: 
-        print(f'Arquivo {record_file} inválido, desconsiderando', file=sys.stderr)
+        print(f'Arquivo {args.record_file} inválido, desconsiderando.', file=sys.stderr)
         record = -1
     atexit.register(lambda: os.remove(args.test_output_file))
     s = time()
@@ -34,7 +33,7 @@ def main(args):
             print(f'Há uma melhora de {record - t}ms de performance')
     else:
         print(f'Primeira execução durou {t}ms')
-    open(record_file, 'w').write(str(t))
+    open(args.record_file, 'w').write(str(t))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='backtester de performance para script appasp.sefaz.go.gov.br-scraper.py')
