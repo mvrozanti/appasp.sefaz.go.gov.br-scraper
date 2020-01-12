@@ -2,28 +2,24 @@
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 import argparse
-import atexit
-import code
 import csv
 import os.path as op
 import re
-import signal
 import sys
 
 BASE_URL = 'http://appasp.sefaz.go.gov.br/'
 DEFAULT_RELATIVE_URL = 'Sintegra/Consulta/default.asp?'
 
 def site_format_error(reason):
-    print(f'Formato do site foi alterado, em função do campo "{reason}". Favor reportar este incidente.')
+    print(f'Formato do site foi alterado, em função do campo "{reason}". Favor reportar este incidente.', file=sys.stderr)
     sys.exit(1)
 
-def formata_cnpj(cnpj):
+def format_cnpj(cnpj):
     return f'{cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:]}'
 
 class CNPJScraper:
@@ -71,7 +67,7 @@ class CNPJScraper:
         try:
             WebDriverWait(d, timeout).until(EC.presence_of_element_located((By.TAG_NAME, 'tbody')))
         except Exception as e: 
-            print(e)
+            print(e, file=sys.stderr)
             site_format_error('tbody não ter sido encontrado')
         tbody_element = d.find_element_by_tag_name('tbody')
         WebDriverWait(d, timeout).until(lambda d: 
@@ -80,7 +76,7 @@ class CNPJScraper:
                 EC.text_to_be_present_in_element(tbody_element, 'foi encontrado nenhum')
                 )
         if 'foi encontrado nenhum' in tbody_element.text:
-            return [formata_cnpj(cnpj_alvo)]+['NULL']*7
+            return [format_cnpj(cnpj_alvo)]+['NULL']*7
         regex_fluxo_principal = re.compile(r'CNPJ:\n(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}).*' +
                 r'INSCRIÇÃO ESTADUAL - CCE :\n(.*)\n.*' +
                 r'NOME EMPRESARIAL:\n(.*)\n.*' +
@@ -121,16 +117,16 @@ class CNPJScraper:
             else:
                 print(e)
                 site_format_error('regex errado')
-            return [formata_cnpj(cnpj_alvo)]+['NULL']*7
+            return [format_cnpj(cnpj_alvo)]+['NULL']*7
 
 def main(args):
     if op.exists(args.output) and not args.force:
         print(f'Arquivo "{args.output}" já existe. Use a opção --force para sobrescrevê-lo.', file=sys.stderr)
         sys.exit(2) 
-    scraper = CNPJScraper(args.url, args.headful)
     if not op.exists(args.input):
         print(f'Arquivo de input "{args.input}" não existe.', file=sys.stderr)
         sys.exit(3)
+    scraper = CNPJScraper(args.url, args.headful)
     cnpjs_alvo = [ca.rstrip() for ca in open(args.input).readlines()]
     with open(args.output, 'w') as of:
         output_writer = csv.writer(of, delimiter=',', dialect='excel', quoting=csv.QUOTE_MINIMAL)
@@ -166,3 +162,4 @@ if __name__ == '__main__':
     parser.add_argument('-v', '--verbose', action='store_true', 
             help='Mostrar mensagens de debug')
     main(parser.parse_args())
+#
