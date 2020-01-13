@@ -37,6 +37,8 @@ class CNPJScraper:
         d = self.driver
         d.switch_to.window(d.window_handles[0])
         d.get(self.url)
+        # WebDriverWait(d, 1).until(EC.presence_of_element_located((By.TAG_NAME, 'form'), ))
+        d.find_element_by_tag_name('form')
         for wh in d.window_handles[1:]:
             d.switch_to.window(wh)
             d.close()
@@ -77,7 +79,7 @@ class CNPJScraper:
                 EC.text_to_be_present_in_element(tbody_element, 'foi encontrado nenhum')
                 )
         if 'foi encontrado nenhum' in tbody_element.text:
-            return [format_cnpj(cnpj_alvo)]+['NULL']*7
+            return [cnpj_alvo]+['NULL']*7
         regex_fluxo_principal = re.compile(r'CNPJ:\n(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}).*'  +
                 r'INSCRIÇÃO ESTADUAL - CCE :\n(.*)\n.*'                                    +
                 r'NOME EMPRESARIAL:\n(.*)\n.*'                                             +
@@ -91,6 +93,10 @@ class CNPJScraper:
             m = next(filter(lambda match: match, regex_fluxo_principal.finditer(body_element.text)))
             info = [i.strip() for i in m.groups()]
             try:
+                info[0] = normalize_cnpj(info[0])
+            except Exception as e:
+                site_format_error(f'CNPJ para o cnpj={cnpj_alvo}')
+            try:
                 info[-1] = normalize_date(info[-1])
             except Exception as e: 
                 site_format_error(f'DATA DESTA SITUAÇÃO CADASTRAL para o cnpj={cnpj_alvo}')
@@ -100,8 +106,8 @@ class CNPJScraper:
                 site_format_error(f'DATA DE CADASTRAMENTO para o cnpj={cnpj_alvo}')
             if not cnpj_alvo:
                 d.close()
-            elif cnpj_alvo != normalize_cnpj(info[0]):
-                site_format_error(f'CNPJ para o cnpj={cnpj_alvo}')
+            elif cnpj_alvo != info[0]:
+                site_format_error(f'CNPJ-alvo e CNPJ extraído para o cnpj_alvo={cnpj_alvo} e CNPJ extraído={info[0]}')
             return info
         except StopIteration as e: # fluxo alternativo, em que várias Inscrições Estaduais estão relacionadas a este CNPJ
             if 'existe mais de uma Inscrição Estadual para o par' in body_element.text: 
