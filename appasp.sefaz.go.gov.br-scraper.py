@@ -14,6 +14,15 @@ import sys
 
 BASE_URL = 'http://appasp.sefaz.go.gov.br/'
 DEFAULT_RELATIVE_URL = 'Sintegra/Consulta/default.asp?'
+REGEX_FLUXO_PRINCIPAL = re.compile(r'CNPJ:\n(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}).*'  +
+        r'INSCRIÇÃO ESTADUAL - CCE :\n(.*)\n.*'                                    +
+        r'NOME EMPRESARIAL:\n(.*)\n.*'                                             +
+        r'CONTRIBUINTE\?\n*(.*)\n(?:\n|.)*\n(?:\n|.)+'                             +
+        r'ATIVIDADE PRINCIPAL\n(.*)(?:\n|.)+'                                      +
+        r'SITUAÇÃO CADASTRAL VIGENTE:\n(.*)\n.*'                                   +
+        r'DATA DESTA SITUAÇÃO CADASTRAL:\n([^\s]+).*'                              +
+        r'DATA DE CADASTRAMENTO:\n(.*)', re.MULTILINE)
+REGEX_FLUXO_MULTIPLAS_INSCRICOES_ESTADUAIS = re.compile(r'abaixo relacionadas\.\n\n((?:\d+\n)+)')
 
 def site_format_error(reason):
     print(f'Formato do site foi alterado, em função do campo "{reason}". Favor reportar este incidente.', file=sys.stderr)
@@ -24,11 +33,12 @@ def format_cnpj(cnpj):
 
 class CNPJScraper:
 
-    def __init__(self, relative_url, headful):
+    def __init__(self, relative_url, headful, timeout):
         opts = Options()
         opts.headless = not headful
         self.driver = webdriver.Firefox(options=opts)
         self.url = BASE_URL + relative_url
+        self.timeout = timeout
 
     def reset(self):
         """
@@ -37,14 +47,16 @@ class CNPJScraper:
         d = self.driver
         d.switch_to.window(d.window_handles[0])
         d.get(self.url)
-        # WebDriverWait(d, 1).until(EC.presence_of_element_located((By.TAG_NAME, 'form'), ))
-        d.find_element_by_tag_name('form')
+        try:
+            WebDriverWait(d, self.timeout).until(EC.presence_of_element_located((By.TAG_NAME, 'form')))
+        except Exception as e: 
+            site_format_error('form não é mostrado')
         for wh in d.window_handles[1:]:
             d.switch_to.window(wh)
             d.close()
         d.switch_to.window(d.window_handles[0])
 
-    def get_single(self, cnpj_alvo, timeout):
+    def get_single(self, cnpj_alvo):
         """
         Extrai o cnpj_alvo da página aberta após consultá-lo, caso seja especificado.
         Caso não seja especificado, procura inscrições-raiz na página atual e as extrai coletivamente.
@@ -68,29 +80,21 @@ class CNPJScraper:
             cnpj_field.send_keys(Keys.RETURN)
         d.switch_to.window(d.window_handles[-1])
         try:
-            WebDriverWait(d, timeout).until(EC.presence_of_element_located((By.TAG_NAME, 'tbody')))
+            WebDriverWait(d, self.timeout).until(EC.presence_of_element_located((By.TAG_NAME, 'tbody')))
         except Exception as e: 
             print(e, file=sys.stderr)
             site_format_error('tbody não ter sido encontrado')
         tbody_element = d.find_element_by_tag_name('tbody')
-        WebDriverWait(d, timeout).until(lambda d: 
+        WebDriverWait(d, self.timeout).until(lambda d: 
                 EC.text_to_be_present_in_element(tbody_element, 'CADASTRO ATUALIZADO EM')
                 or
                 EC.text_to_be_present_in_element(tbody_element, 'foi encontrado nenhum')
                 )
         if 'foi encontrado nenhum' in tbody_element.text:
             return [cnpj_alvo]+['NULL']*7
-        regex_fluxo_principal = re.compile(r'CNPJ:\n(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}).*'  +
-                r'INSCRIÇÃO ESTADUAL - CCE :\n(.*)\n.*'                                    +
-                r'NOME EMPRESARIAL:\n(.*)\n.*'                                             +
-                r'CONTRIBUINTE\?\n*(.*)\n(?:\n|.)*\n(?:\n|.)+'                             +
-                r'ATIVIDADE PRINCIPAL\n(.*)(?:\n|.)+'                                      +
-                r'SITUAÇÃO CADASTRAL VIGENTE:\n(.*)\n.*'                                   +
-                r'DATA DESTA SITUAÇÃO CADASTRAL:\n([^\s]+).*'                              +
-                r'DATA DE CADASTRAMENTO:\n(.*)', re.MULTILINE)
         try:
             body_element = d.find_element_by_tag_name('body')
-            m = next(filter(lambda match: match, regex_fluxo_principal.finditer(body_element.text)))
+            m = next(filter(lambda match: match, REGEX_FLUXO_PRINCIPAL.finditer(body_element.text)))
             info = [i.strip() for i in m.groups()]
             try:
                 info[0] = normalize_cnpj(info[0])
@@ -111,19 +115,18 @@ class CNPJScraper:
             return info
         except StopIteration as e: # fluxo alternativo, em que várias Inscrições Estaduais estão relacionadas a este CNPJ
             if 'existe mais de uma Inscrição Estadual para o par' in body_element.text: 
-                regex_fluxo_multiplas_inscricoes_estaduais = re.compile(r'abaixo relacionadas\.\n\n((?:\d+\n)+)')
-                m = next(regex_fluxo_multiplas_inscricoes_estaduais.finditer(body_element.text))
+                m = next(REGEX_FLUXO_MULTIPLAS_INSCRICOES_ESTADUAIS.finditer(body_element.text))
                 cnpjs_raiz_alvo = [cnpj for cnpj in m.group(1).split('\n') if cnpj]
                 mult = []
                 wh = self.driver.current_window_handle
                 for cnpj_raiz_alvo in cnpjs_raiz_alvo:
                     d.switch_to.window(wh)
                     d.execute_script(f"fSend('{cnpj_raiz_alvo}')")
-                    mult += [self.get_single(None, timeout)]
+                    mult += [self.get_single(None)]
                 return mult
             else:
                 print(e)
-                site_format_error('regex errado')
+                site_format_error('regex invalidado')
             return [format_cnpj(cnpj_alvo)]+['NULL']*7
 
 def main(args):
@@ -133,7 +136,7 @@ def main(args):
     if not op.exists(args.input):
         print(f'Arquivo de input "{args.input}" não existe.', file=sys.stderr)
         sys.exit(3)
-    scraper = CNPJScraper(args.url, args.headful)
+    scraper = CNPJScraper(args.url, args.headful, args.timeout)
     cnpjs_alvo = [ca.rstrip() for ca in open(args.input).readlines()]
     with open(args.output, 'w') as of:
         output_writer = csv.writer(of, delimiter=',', dialect='excel', quoting=csv.QUOTE_MINIMAL)
@@ -141,7 +144,7 @@ def main(args):
             scraper.reset()
             if args.verbose:
                 print(f'Tentando {cnpj_alvo}:')
-            cnpj_info = scraper.get_single(cnpj_alvo, args.timeout)
+            cnpj_info = scraper.get_single(cnpj_alvo)
             if args.verbose:
                 print(cnpj_info)
             if cnpj_info:
